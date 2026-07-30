@@ -35,6 +35,49 @@ body {
   padding: 0 90px;
 }
 
+/* ===== BARRA DE SESIÓN (usuario / conectados / logout) ===== */
+
+.session-bar {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.session-bar .current-user {
+  font-weight: bold;
+  color: #1d4ed8;
+  white-space: nowrap;
+}
+
+.session-bar .connected-users {
+  color: #475569;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.session-bar a {
+  color: #dc2626;
+  text-decoration: none;
+  font-weight: bold;
+  border: 1px solid #dc2626;
+  border-radius: 6px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.session-bar a:hover {
+  background: #dc2626;
+  color: #ffffff;
+}
+
 .top-panel {
   display: grid;
   gap: 15px;
@@ -388,6 +431,15 @@ body {
     padding: 0;
   }
 
+  .session-bar {
+    position: static;
+    transform: none;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    width: 100%;
+  }
+
   .top-panel {
     grid-template-columns: 1fr !important;
   }
@@ -540,5 +592,14 @@ body {
   .mini-chart-container {
     width: 95%;
     height: 160px;
+  }
+
+  .session-bar {
+    font-size: 12px;
+    gap: 6px;
+  }
+
+  .session-bar .connected-users {
+    padding: 3px 8px;
   }
 }
