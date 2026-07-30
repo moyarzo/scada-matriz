@@ -3,55 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>SCADA MATRIZ</title>
-
   <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Estilos mínimos para la barra de sesión, no dependen de styles.css */
+    .session-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      padding: 6px 16px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 13px;
+    }
+    .session-bar .connected-users {
+      color: #94a3b8;
+    }
+    .session-bar .current-user {
+      font-weight: bold;
+      color: #f1f5f9;
+    }
+    .session-bar a {
+      color: #f87171;
+      text-decoration: none;
+      border: 1px solid #f87171;
+      padding: 3px 10px;
+      border-radius: 4px;
+    }
+    .session-bar a:hover {
+      background: #f87171;
+      color: #0f172a;
+    }
+  </style>
 </head>
-
 <body>
-
+  <div class="session-bar">
+    <span class="current-user" id="currentUser"></span>
+    <span class="connected-users" id="connectedUsers">Conectados: --</span>
+    <a href="/logout">Cerrar sesión</a>
+  </div>
   <div class="header">
     <img src="logo.png" class="logo" alt="Logo">
     <h1>SISTEMA MONITOREO SILOS MATRIZ</h1>
   </div>
-
   <div class="top-panel" id="topPanel"></div>
-
   <div class="mode-bar">
     <div class="mode-selector">
       <label>
         <input type="radio" name="mode" value="demo">
         Modo DEMO
       </label>
-
       <label>
         <input type="radio" name="mode" value="real" checked>
         Modo REAL
       </label>
     </div>
-
     <div class="mqtt-status" id="mqttStatus">🔴 Sin señal (--:--:--)</div>
-
     <div class="chart-date-bar">
       <label for="chartDateSelect">Día gráficos:</label>
       <select id="chartDateSelect"></select>
     </div>
-
     <button id="exportBtn" class="export-btn">Descargar Excel diario</button>
     <button id="exportTrendBtn" class="export-btn">Descargar historial 30 días</button>
   </div>
-
   <div class="grid" id="grid"></div>
-
   <footer class="footer">
     &#169; 2026 Engineered and developed by MOH (marco.oyarzo@enaex.com) | All rights reserved
   </footer>
-
   <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <script src="app.js"></script>
+  <script>
+    // Quién soy (usa la cookie de sesión ya activa)
+    fetch("/whoami")
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        document.getElementById("currentUser").innerText = "Usuario: " + data.user;
+      })
+      .catch(function () {});
 
+    // Lista de usuarios conectados en tiempo real, emitida por el servidor.
+    // Reutiliza el objeto "socket" ya creado en app.js (misma conexión).
+    if (typeof socket !== "undefined") {
+      socket.on("connectedUsers", function (users) {
+        document.getElementById("connectedUsers").innerText =
+          "Conectados: " + users.join(", ");
+      });
+    }
+  </script>
 </body>
 </html>
