@@ -1,3 +1,5 @@
+require("dotenv").config();
+
 const express = require("express");
 const http = require("http");
 const Server = require("socket.io").Server;
@@ -5,6 +7,11 @@ const fs = require("fs");
 const path = require("path");
 const mqtt = require("mqtt");
 const ExcelJS = require("exceljs");
+
+// ===== AUTENTICACIÓN =====
+const session = require("express-session");
+const sharedSession = require("express-socket.io-session");
+const bcrypt = require("bcryptjs");
 
 const app = express();
 const server = http.createServer(app);
@@ -60,6 +67,83 @@ const EXPORTS_DIR        = path.join(__dirname, "exports");
 if (!fs.existsSync(EXPORTS_DIR)) {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
 }
+
+// ===== USUARIOS (login) =====
+// Los 3 usuarios y sus hashes bcrypt se definen en el archivo .env
+// (ver generate-hash.js para crear los hashes de las contraseñas)
+
+const USERS = {};
+if (process.env.USER1_NAME) USERS[process.env.USER1_NAME] = process.env.USER1_HASH;
+if (process.env.USER2_NAME) USERS[process.env.USER2_NAME] = process.env.USER2_HASH;
+if (process.env.USER3_NAME) USERS[process.env.USER3_NAME] = process.env.USER3_HASH;
+
+async function validateLogin(username, password) {
+  var hash = USERS[username];
+  if (!hash) return false;
+  return bcrypt.compare(password, hash);
+}
+
+function requireAuth(req, res, next) {
+  if (req.session && req.session.user) return next();
+  return res.redirect("/login.html");
+}
+
+var sessionMiddleware = session({
+  secret: process.env.SESSION_SECRET || "cambia_esta_clave_en_produccion",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    maxAge: 8 * 60 * 60 * 1000, // 8 horas
+    httpOnly: true
+    // secure: true  // <- descomentar cuando el sitio corra bajo HTTPS
+  }
+});
+
+app.use(sessionMiddleware);
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Usuarios actualmente conectados: socket.id -> username
+var connectedUsers = new Map();
+
+function broadcastConnectedUsers() {
+  var unique = Array.from(new Set(connectedUsers.values()));
+  io.emit("connectedUsers", unique);
+}
+
+// ===== RUTAS DE LOGIN (accesibles sin sesión) =====
+
+app.get("/login.html", function (req, res) {
+  res.sendFile(path.join(__dirname, "login.html"));
+});
+
+app.post("/login", async function (req, res) {
+  var username = req.body.username;
+  var password = req.body.password;
+
+  try {
+    var ok = await validateLogin(username, password);
+    if (ok) {
+      req.session.user = username;
+      return res.redirect("/");
+    }
+    return res.redirect("/login.html?error=1");
+  } catch (error) {
+    console.error("Error validando login:", error);
+    return res.redirect("/login.html?error=1");
+  }
+});
+
+app.get("/logout", function (req, res) {
+  req.session.destroy(function () {
+    res.redirect("/login.html");
+  });
+});
+
+// El propio frontend puede pedir quién está logueado
+app.get("/whoami", requireAuth, function (req, res) {
+  res.json({ user: req.session.user });
+});
 
 // ===== ARCHIVOS =====
 
@@ -375,25 +459,17 @@ function calculateVariationsFromHistory(dayHistory) {
 
 // ===== RESUMEN DIARIO (guardado a las 19:00) =====
 
-/**
- * Obtiene el valor más cercano a una hora dada (ej: "07:00", "19:00")
- * dentro de un array de historial { time, value }.
- * Busca exacto primero, luego el más próximo en ventana de ±30 min.
- */
 function getValueNearTime(historyArr, targetTime) {
   if (!historyArr || historyArr.length === 0) return null;
 
-  // Buscar exacto
   var exact = historyArr.find(function (item) {
     return item.time === targetTime;
   });
   if (exact) return Number(exact.value);
 
-  // Convertir targetTime a minutos totales
   var parts = targetTime.split(":");
   var targetMinutes = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
 
-  // Buscar el punto con menor diferencia en ventana de 30 min
   var best = null;
   var bestDiff = Infinity;
 
@@ -411,17 +487,12 @@ function getValueNearTime(historyArr, targetTime) {
   return best;
 }
 
-/**
- * Construye el objeto de resumen para un día dado.
- * Puede recibir el historial directamente (para el día actual) o leerlo del archivo.
- */
 function buildDaySummary(dateKey, dayHistory, turnDataForDay, variationsForDay) {
   var summary = { date: dateKey };
 
   ["DL-5", "VE-03", "ASE"].forEach(function (product) {
     var arr = dayHistory[product] || [];
 
-    // Inicio y fin desde turnData si está disponible, si no desde historial
     var inicio = null;
     var fin    = null;
 
@@ -448,10 +519,6 @@ function buildDaySummary(dateKey, dayHistory, turnDataForDay, variationsForDay) 
   return summary;
 }
 
-/**
- * Guarda el resumen del día actual en dailySummary.json.
- * Se llama automáticamente a las 19:00 y también puede llamarse manualmente.
- */
 function saveDailySummary() {
   var dayKey     = today();
   var dayHistory = getTodayHistory();
@@ -469,11 +536,6 @@ function saveDailySummary() {
   return summary;
 }
 
-/**
- * Retorna los resúmenes de los últimos 30 días.
- * Si un día no tiene resumen guardado en dailySummary.json,
- * lo reconstruye on-the-fly desde historyData.json.
- */
 function getLast30DailySummaries() {
   var allSummaries = readJson(DAILY_SUMMARY_FILE, {});
   var allHistory   = readJson(HISTORY_FILE, {});
@@ -487,7 +549,6 @@ function getLast30DailySummaries() {
     if (allSummaries[dateKey]) {
       result.push(allSummaries[dateKey]);
     } else {
-      // Reconstruir desde historial si existe
       var dayHistory = allHistory[dateKey];
       if (dayHistory) {
         var turnDay    = turnAll[dateKey] || {};
@@ -495,7 +556,6 @@ function getLast30DailySummaries() {
         var summary    = buildDaySummary(dateKey, dayHistory, turnDay, variations);
         result.push(summary);
       }
-      // Si no hay historial para ese día, simplemente se omite
     }
   }
 
@@ -504,13 +564,6 @@ function getLast30DailySummaries() {
 
 // ===== EXPORTACIÓN CSV RESUMEN DIARIO =====
 
-/**
- * Genera el CSV con una fila por día y columnas:
- * Fecha,
- * DL-5_Inicio(ton), DL-5_Fin(ton), DL-5_VarPos(ton), DL-5_VarNeg(ton),
- * VE-03_Inicio(ton), VE-03_Fin(ton), VE-03_VarPos(ton), VE-03_VarNeg(ton),
- * ASE_Inicio(ton),  ASE_Fin(ton),  ASE_VarPos(ton),  ASE_VarNeg(ton)
- */
 function buildDailySummaryCsv() {
   var summaries = getLast30DailySummaries();
 
@@ -713,8 +766,6 @@ function checkDailySummaryTrigger() {
   var m   = now.getMinutes();
   var d   = today();
 
-  // Guardar entre las 19:00 y las 19:05 (ventana de 5 min para no depender del tick exacto)
-  // Solo una vez por día
   if (h === 19 && m < 5) {
     if (!dailySummarySavedToday) {
       saveDailySummary();
@@ -722,7 +773,6 @@ function checkDailySummaryTrigger() {
       console.log("Resumen diario guardado automáticamente para:", d);
     }
   } else {
-    // Resetear la bandera al comenzar un nuevo día (fuera de la ventana de 19:00)
     if (h !== 19 || m >= 5) {
       dailySummarySavedToday = false;
     }
@@ -733,11 +783,11 @@ function checkDailySummaryTrigger() {
 
 setInterval(checkShift, 60000);
 setInterval(updatePersistentHistory, 60000);
-setInterval(checkDailySummaryTrigger, 60000);   // revisa cada minuto si son las 19:00
+setInterval(checkDailySummaryTrigger, 60000);
 
-// ===== RUTAS HTTP =====
+// ===== RUTAS HTTP (protegidas) =====
 
-app.get("/export-data", async function (req, res) {
+app.get("/export-data", requireAuth, async function (req, res) {
   try {
     var exportFile = await buildExportExcel();
     return res.download(exportFile.filePath, exportFile.fileName);
@@ -747,11 +797,7 @@ app.get("/export-data", async function (req, res) {
   }
 });
 
-/**
- * Nueva ruta: descarga el CSV de resumen diario (últimos 30 días).
- * Reemplaza a /export-trend.
- */
-app.get("/export-daily-summary", function (req, res) {
+app.get("/export-daily-summary", requireAuth, function (req, res) {
   try {
     var csv      = buildDailySummaryCsv();
     var fileName = "historial_" + formatDateYYYYMMDD() + ".csv";
@@ -765,14 +811,34 @@ app.get("/export-daily-summary", function (req, res) {
   }
 });
 
-// Ruta legacy mantenida por compatibilidad (redirige a la nueva)
-app.get("/export-trend", function (req, res) {
+app.get("/export-trend", requireAuth, function (req, res) {
   return res.redirect("/export-daily-summary");
 });
 
 // ===== SOCKET =====
 
+// Comparte la sesión HTTP con las conexiones de Socket.IO
+io.use(sharedSession(sessionMiddleware, { autoSave: true }));
+
 io.on("connection", function (socket) {
+  var username = socket.handshake.session && socket.handshake.session.user;
+
+  // Si no hay sesión válida, se rechaza la conexión del socket
+  if (!username) {
+    socket.disconnect(true);
+    return;
+  }
+
+  connectedUsers.set(socket.id, username);
+  broadcastConnectedUsers();
+  console.log("Usuario conectado por socket:", username);
+
+  socket.on("disconnect", function () {
+    connectedUsers.delete(socket.id);
+    broadcastConnectedUsers();
+    console.log("Usuario desconectado:", username);
+  });
+
   socket.on("getTurnData", function (payload) {
     var data    = readJson(TURN_FILE, {});
     var dateKey = payload && payload.date ? payload.date : today();
@@ -818,7 +884,9 @@ io.on("connection", function (socket) {
   });
 });
 
-app.use(express.static(__dirname));
+// login.html y sus assets quedan servidos por la ruta /login.html de arriba.
+// Todo lo demás (dashboard, JS, CSS del panel) requiere sesión activa.
+app.use("/", requireAuth, express.static(__dirname));
 
 server.listen(3000, "0.0.0.0", function () {
   console.log("Servidor corriendo en puerto 3000");
