@@ -76,6 +76,8 @@ const USERS = {};
 if (process.env.USER1_NAME) USERS[process.env.USER1_NAME] = process.env.USER1_HASH;
 if (process.env.USER2_NAME) USERS[process.env.USER2_NAME] = process.env.USER2_HASH;
 if (process.env.USER3_NAME) USERS[process.env.USER3_NAME] = process.env.USER3_HASH;
+if (process.env.USER4_NAME) USERS[process.env.USER4_NAME] = process.env.USER4_HASH;
+if (process.env.USER5_NAME) USERS[process.env.USER5_NAME] = process.env.USER5_HASH;
 
 async function validateLogin(username, password) {
   var hash = USERS[username];
